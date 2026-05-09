@@ -41,7 +41,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, __u32);
     __type(value, struct pid_ctx);
-    __uint(max_entries, 10240);
+    __uint(max_entries, 65536);
 } pid_ctx_map SEC(".maps");
 
 struct {
