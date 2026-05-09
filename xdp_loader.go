@@ -90,11 +90,9 @@ func (x *XDPBlocker) Unban(ip uint32) error {
 func (x *XDPBlocker) Close() error {
 	var closeErr error
 	if x.link != nil {
-		closeErr = x.link.Close()
+		closeErr = errors.Join(closeErr, x.link.Close())
 	}
-	if err := x.objects.Close(); err != nil && closeErr == nil {
-		closeErr = err
-	}
+	closeErr = errors.Join(closeErr, x.objects.Close())
 	return closeErr
 }
 

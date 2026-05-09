@@ -18,7 +18,7 @@ type Config struct {
 	Ban struct {
 		Threshold        int    `yaml:"threshold"`
 		WindowMinutes    int    `yaml:"window_minutes"`
-		DurationMinutes  int    `yaml:"duration_minutes"`
+		DurationMinutes  int    `yaml:"duration_minutes"` // 0 表示永久封禁
 		MaxBlockedIPs    uint32 `yaml:"max_blocked_ips"`
 		ShortConnSeconds int    `yaml:"short_conn_seconds"`
 	} `yaml:"ban"`
