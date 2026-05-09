@@ -54,8 +54,20 @@ func (l *EventLogger) Event(name string, fields map[string]interface{}) {
 		builder.WriteString(" ")
 		builder.WriteString(key)
 		builder.WriteString("=")
-		builder.WriteString(fmt.Sprint(fields[key]))
+		writeFieldValue(&builder, fields[key])
 	}
 
 	l.logger.Println(builder.String())
+}
+
+// writeFieldValue 将值写入 builder，字符串类型用引号包裹以便日志解析。
+func writeFieldValue(b *strings.Builder, v interface{}) {
+	switch val := v.(type) {
+	case string:
+		b.WriteByte('"')
+		b.WriteString(val)
+		b.WriteByte('"')
+	default:
+		b.WriteString(fmt.Sprint(v))
+	}
 }

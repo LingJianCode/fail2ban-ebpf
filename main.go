@@ -143,7 +143,7 @@ func initResources(cfg Config, objs *sshmonObjects) (
 	banManager = NewBanManager(cfg)
 
 	port := cfg.SSH.Port
-	var enabled uint8 = 1
+	enabled := uint8(1)
 	if err = objs.MonitoredPorts.Update(port, enabled, 0); err != nil {
 		return nil, nil, "", nil, nil, nil, fmt.Errorf("update port map: %w", err)
 	}
