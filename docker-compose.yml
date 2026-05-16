@@ -14,9 +14,9 @@ services:
       - /sys/fs/bpf:/sys/fs/bpf
       - /sys/kernel/debug:/sys/kernel/debug
       - /sys/kernel/btf:/sys/kernel/btf:ro
-      - /usr/lib:/usr/lib:ro
-      - /usr/lib64:/usr/lib64:ro
-      - /lib:/lib:ro
-      - /lib64:/lib64:ro
+      - /usr/lib:/usr/lib
+      - /usr/lib64:/usr/lib64
+      - /lib:/lib
+      - /lib64:/lib64
     environment:
       TZ: Asia/Shanghai

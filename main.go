@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -240,16 +241,31 @@ func findLibPAM() string {
 }
 
 func ensureExecutable(path string) error {
-	info, err := os.Stat(path)
+	// 先用 Lstat 检测是否是符号链接（不跟随）
+	info, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
 
+	// 如果是符号链接，则解析出真实路径
+	realPath := path
+	if info.Mode()&os.ModeSymlink != 0 {
+		realPath, err = filepath.EvalSymlinks(path)
+		if err != nil {
+			return fmt.Errorf("failed to resolve symlink %s: %w", path, err)
+		}
+		// 重新获取真实文件的 info
+		info, err = os.Stat(realPath)
+		if err != nil {
+			return err
+		}
+	}
+
 	mode := info.Mode()
 	if mode&0111 == 0 {
-		err := os.Chmod(path, mode|0111)
+		err = os.Chmod(realPath, mode|0111)
 		if err != nil {
-			return fmt.Errorf("failed to chmod +x %s: %w (try running as sudo)", path, err)
+			return fmt.Errorf("failed to chmod +x %s: %w (try running as sudo)", realPath, err)
 		}
 	}
 	return nil
