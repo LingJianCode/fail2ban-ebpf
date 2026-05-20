@@ -27,7 +27,7 @@ func NewXDPBlocker(cfg Config) (*XDPBlocker, error) {
 	}
 
 	if mapSpec := spec.Maps["blocked_ips"]; mapSpec != nil {
-		mapSpec.MaxEntries = cfg.Ban.MaxBlockedIPs
+		mapSpec.MaxEntries = cfg.SSH.MaxBlockedIPs
 	}
 
 	var objects xdpObjects

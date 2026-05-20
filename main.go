@@ -62,7 +62,7 @@ func main() {
 	}
 	defer eventLogger.Close()
 
-	rt, rd, libPath, banFilter, banManager, xdpBlocker, err := initResources(cfg, &objs)
+	rt, rd, libPath, banFilter, banManager, xdpBlocker, nginxBanManager, err := initResources(cfg, &objs)
 	if err != nil {
 		fatalf("init: %v", err)
 	}
@@ -75,27 +75,37 @@ func main() {
 		"config":             *configPath,
 		"libpam":             libPath,
 		"log_file":           cfg.Log.File,
-		"mode":               cfg.Mode,
-		"short_conn_seconds": cfg.Ban.ShortConnSeconds,
+		"mode":               cfg.SSH.Mode,
+		"short_conn_seconds": cfg.SSH.ShortConnSeconds,
 		"ssh_port":           cfg.SSH.Port,
-		"threshold":          cfg.Ban.Threshold,
-		"window_minutes":     cfg.Ban.WindowMinutes,
+		"threshold":          cfg.SSH.Ban.Threshold,
+		"window_minutes":     cfg.SSH.Ban.WindowMinutes,
 		"xdp_iface":          cfg.XDP.Iface,
 		"xdp_mode":           xdpBlocker.Mode(),
+		"nginx_enabled":      cfg.Nginx.Enabled,
 	})
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 
 	go func() {
 		defer wg.Done()
-		runBanExpiryLoop(ctx, banManager, xdpBlocker)
+		runBanExpiryLoop(ctx, banManager, nginxBanManager, xdpBlocker)
 	}()
 
 	go func() {
 		defer wg.Done()
 		runEventProcessor(ctx, rd, banManager, banFilter, xdpBlocker, cfg)
 	}()
+
+	if cfg.Nginx.Enabled {
+		go func() {
+			defer wg.Done()
+			runNginxEventProcessor(ctx, rt.nginxMod, nginxBanManager, banFilter, xdpBlocker, cfg)
+		}()
+	} else {
+		wg.Done()
+	}
 
 	<-ctx.Done()
 	eventLogger.Event("service_stopping", map[string]interface{}{
@@ -119,6 +129,7 @@ func initResources(cfg Config, objs *sshmonObjects) (
 	banFilter *BanFilter,
 	banManager *BanManager,
 	xdpBlocker *XDPBlocker,
+	nginxBanManager *BanManager,
 	err error,
 ) {
 	var closers []func()
@@ -132,12 +143,12 @@ func initResources(cfg Config, objs *sshmonObjects) (
 
 	banFilter, err = NewBanFilter(cfg)
 	if err != nil {
-		return nil, nil, "", nil, nil, nil, fmt.Errorf("create ban filter: %w", err)
+		return nil, nil, "", nil, nil, nil, nil, fmt.Errorf("create ban filter: %w", err)
 	}
 
 	xdpBlocker, err = NewXDPBlocker(cfg)
 	if err != nil {
-		return nil, nil, "", nil, nil, nil, fmt.Errorf("attach xdp: %w", err)
+		return nil, nil, "", nil, nil, nil, nil, fmt.Errorf("attach xdp: %w", err)
 	}
 	closers = append(closers, func() { _ = xdpBlocker.Close() })
 
@@ -146,24 +157,24 @@ func initResources(cfg Config, objs *sshmonObjects) (
 	port := cfg.SSH.Port
 	enabled := uint8(1)
 	if err = objs.MonitoredPorts.Update(port, enabled, 0); err != nil {
-		return nil, nil, "", nil, nil, nil, fmt.Errorf("update port map: %w", err)
+		return nil, nil, "", nil, nil, nil, nil, fmt.Errorf("update port map: %w", err)
 	}
 
 	kpAccept, err := attachAcceptProbe(objs)
 	if err != nil {
-		return nil, nil, "", nil, nil, nil, fmt.Errorf("attach accept probe: %w", err)
+		return nil, nil, "", nil, nil, nil, nil, fmt.Errorf("attach accept probe: %w", err)
 	}
 	closers = append(closers, func() { _ = kpAccept.Close() })
 
 	tpFork, err := link.Tracepoint("sched", "sched_process_fork", objs.HandleFork, nil)
 	if err != nil {
-		return nil, nil, "", nil, nil, nil, fmt.Errorf("attach sched_process_fork: %w", err)
+		return nil, nil, "", nil, nil, nil, nil, fmt.Errorf("attach sched_process_fork: %w", err)
 	}
 	closers = append(closers, func() { _ = tpFork.Close() })
 
 	tpExit, err := link.Tracepoint("sched", "sched_process_exit", objs.HandleExit, nil)
 	if err != nil {
-		return nil, nil, "", nil, nil, nil, fmt.Errorf("attach sched_process_exit: %w", err)
+		return nil, nil, "", nil, nil, nil, nil, fmt.Errorf("attach sched_process_exit: %w", err)
 	}
 	closers = append(closers, func() { _ = tpExit.Close() })
 
@@ -176,20 +187,43 @@ func initResources(cfg Config, objs *sshmonObjects) (
 
 	ex, err := link.OpenExecutable(libPath)
 	if err != nil {
-		return nil, nil, "", nil, nil, nil, fmt.Errorf("open libpam: %w", err)
+		return nil, nil, "", nil, nil, nil, nil, fmt.Errorf("open libpam: %w", err)
 	}
 
 	up, err := ex.Uretprobe("pam_authenticate", objs.HandlePamAuth, nil)
 	if err != nil {
-		return nil, nil, "", nil, nil, nil, fmt.Errorf("attach uretprobe: %w", err)
+		return nil, nil, "", nil, nil, nil, nil, fmt.Errorf("attach uretprobe: %w", err)
 	}
 	closers = append(closers, func() { _ = up.Close() })
 
 	rd, err = ringbuf.NewReader(objs.Events)
 	if err != nil {
-		return nil, nil, "", nil, nil, nil, fmt.Errorf("create perf reader: %w", err)
+		return nil, nil, "", nil, nil, nil, nil, fmt.Errorf("create perf reader: %w", err)
 	}
 	closers = append(closers, func() { _ = rd.Close() })
+
+	// 加载 Nginx 模块（如果启用）
+	var nginxMod *NginxModule
+	if cfg.Nginx.Enabled {
+		nginxMod, err = LoadNginxModule(cfg.Nginx)
+		if err != nil {
+			return nil, nil, "", nil, nil, nil, nil, fmt.Errorf("load nginx module: %w", err)
+		}
+		closers = append(closers, func() { _ = nginxMod.Close() })
+		eventLogger.Event("nginx_module_loaded", map[string]interface{}{
+			"watch_status_codes": cfg.Nginx.WatchStatusCodes,
+			"offset":            cfg.Nginx.Offset,
+			"ban_threshold":    cfg.Nginx.Ban.Threshold,
+			"ban_window_min":   cfg.Nginx.Ban.WindowMinutes,
+		})
+	}
+
+	// 创建 Nginx 独立 BanManager
+	nginxBanManager = NewBanManagerFromConfig(
+		cfg.Nginx.Ban.Threshold,
+		cfg.Nginx.Ban.WindowMinutes,
+		cfg.Nginx.Ban.DurationMinutes,
+	)
 
 	rt = &Runtime{
 		objs:       objs,
@@ -199,8 +233,9 @@ func initResources(cfg Config, objs *sshmonObjects) (
 		tpExit:     tpExit,
 		pamProbe:   up,
 		xdpBlocker: xdpBlocker,
+		nginxMod:   nginxMod,
 	}
-	return rt, rd, libPath, banFilter, banManager, xdpBlocker, nil
+	return rt, rd, libPath, banFilter, banManager, xdpBlocker, nginxBanManager, nil
 }
 
 // findLibPAM 自动适配架构并动态查找 libpam 路径
@@ -281,7 +316,7 @@ func ipv4String(raw uint32) string {
 	return ip.String()
 }
 
-func runBanExpiryLoop(ctx context.Context, banManager *BanManager, blocker *XDPBlocker) {
+func runBanExpiryLoop(ctx context.Context, banManager *BanManager, nginxBanManager *BanManager, blocker *XDPBlocker) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 
@@ -296,7 +331,20 @@ func runBanExpiryLoop(ctx context.Context, banManager *BanManager, blocker *XDPB
 					continue
 				}
 				eventLogger.Event("ip_unblocked", map[string]interface{}{
-					"ip": ipv4String(ip),
+					"ip":      ipv4String(ip),
+					"source":  "ssh",
+				})
+			}
+			for _, ip := range nginxBanManager.Expired(time.Now()) {
+				if err := blocker.Unban(ip); err != nil {
+					eventLogger.Event("warning", map[string]interface{}{
+						"message": fmt.Sprintf("failed to unban %s: %v", ipv4String(ip), err),
+					})
+					continue
+				}
+				eventLogger.Event("ip_unblocked", map[string]interface{}{
+					"ip":      ipv4String(ip),
+					"source":  "nginx",
 				})
 			}
 		case <-ctx.Done():
@@ -371,8 +419,8 @@ func runEventProcessor(
 				if banned, expiresAt := banManager.RegisterFailure(event.RemoteIP, time.Now()); banned {
 					logBanResult(banFilter, blocker, fields["ip"], event.RemoteIP, expiresAt, map[string]interface{}{
 						"reason":         "auth_failed",
-						"threshold":      cfg.Ban.Threshold,
-						"window_minutes": cfg.Ban.WindowMinutes,
+						"threshold":      cfg.SSH.Ban.Threshold,
+						"window_minutes": cfg.SSH.Ban.WindowMinutes,
 					})
 				}
 			case eventPreauthShortConn:
@@ -400,8 +448,8 @@ func runEventProcessor(
 						"reason":         reason,
 						"exit_status":    exitStatus,
 						"exit_signal":    exitSignal,
-						"threshold":      cfg.Ban.Threshold,
-						"window_minutes": cfg.Ban.WindowMinutes,
+						"threshold":      cfg.SSH.Ban.Threshold,
+						"window_minutes": cfg.SSH.Ban.WindowMinutes,
 					})
 					continue
 				}
@@ -409,9 +457,9 @@ func runEventProcessor(
 				if banned, expiresAt := banManager.RegisterFailure(event.RemoteIP, time.Now()); banned {
 					logBanResult(banFilter, blocker, fields["ip"], event.RemoteIP, expiresAt, map[string]interface{}{
 						"reason":             "preauth_short_conn",
-						"short_conn_seconds": cfg.Ban.ShortConnSeconds,
-						"threshold":          cfg.Ban.Threshold,
-						"window_minutes":     cfg.Ban.WindowMinutes,
+						"short_conn_seconds": cfg.SSH.ShortConnSeconds,
+						"threshold":          cfg.SSH.Ban.Threshold,
+						"window_minutes":     cfg.SSH.Ban.WindowMinutes,
 					})
 				}
 			default:
@@ -421,6 +469,87 @@ func runEventProcessor(
 			}
 		}
 	}
+}
+
+// runNginxEventProcessor 处理 Nginx HTTP 状态码事件，接入 BanManager 实现自动封禁
+func runNginxEventProcessor(
+	ctx context.Context,
+	nginxMod *NginxModule,
+	nginxBanManager *BanManager,
+	banFilter *BanFilter,
+	blocker *XDPBlocker,
+	cfg Config,
+) {
+	type readResult struct {
+		event NginxEvent
+		err   error
+	}
+
+	for {
+		readCh := make(chan readResult, 1)
+		go func() {
+			ev, err := nginxMod.ReadEvent()
+			readCh <- readResult{event: ev, err: err}
+		}()
+
+		select {
+		case <-ctx.Done():
+			_ = nginxMod.Reader.Close()
+			<-readCh
+			return
+		case result := <-readCh:
+			if result.err != nil {
+				if isClosedPerfError(result.err) || ctx.Err() != nil {
+					return
+				}
+				eventLogger.Event("warning", map[string]interface{}{
+					"message": fmt.Sprintf("read nginx event: %v", result.err),
+				})
+				continue
+			}
+
+			ev := result.event
+
+			// 跳过不在监控列表中的状态码
+			if !cfg.Nginx.IsWatchedStatus(int(ev.Status)) {
+				continue
+			}
+
+			fields := map[string]interface{}{
+				"ip":     ipv4String(ev.Addr),
+				"pid":    ev.Pid,
+				"status": ev.Status,
+				"fd":     ev.Fd,
+				"source": "nginx",
+			}
+
+			eventLogger.Event("http_status", fields)
+
+			if ev.Addr == 0 {
+				continue
+			}
+
+			if banned, expiresAt := nginxBanManager.RegisterFailure(ev.Addr, time.Now()); banned {
+				logBanResult(banFilter, blocker, fields["ip"], ev.Addr, expiresAt, map[string]interface{}{
+					"reason":         "nginx_http_status",
+					"status":         ev.Status,
+					"threshold":      cfg.Nginx.Ban.Threshold,
+					"window_minutes": cfg.Nginx.Ban.WindowMinutes,
+					"source":         "nginx",
+				})
+			}
+		}
+	}
+}
+
+// IsWatchedStatus 检查 HTTP 状态码是否在监控列表中
+func (nc NginxConfig) IsWatchedStatus(status int) bool {
+	for _, s := range nc.WatchStatusCodes {
+		if s == status {
+			return true
+		}
+	}
+	return false
 }
 
 func attachAcceptProbe(objs *sshmonObjects) (link.Link, error) {
@@ -458,13 +587,13 @@ func loadConfiguredSshmonObjects(objs *sshmonObjects, cfg Config) error {
 	}
 
 	if preauthVar := spec.Variables["preauth_short_conn_ns"]; preauthVar != nil {
-		if err := preauthVar.Set(uint64(cfg.Ban.ShortConnSeconds) * uint64(time.Second)); err != nil {
+		if err := preauthVar.Set(uint64(cfg.SSH.ShortConnSeconds) * uint64(time.Second)); err != nil {
 			return fmt.Errorf("set preauth_short_conn_ns: %w", err)
 		}
 	}
 	if modeVar := spec.Variables["aggressive_mode"]; modeVar != nil {
 		var enabled uint8
-		if cfg.Mode == "aggressive" {
+		if cfg.SSH.Mode == "aggressive" {
 			enabled = 1
 		}
 		if err := modeVar.Set(enabled); err != nil {

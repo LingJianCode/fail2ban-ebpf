@@ -16,9 +16,20 @@ type BanManager struct {
 
 func NewBanManager(cfg Config) *BanManager {
 	return &BanManager{
-		window:    time.Duration(cfg.Ban.WindowMinutes) * time.Minute,
-		threshold: cfg.Ban.Threshold,
-		duration:  time.Duration(cfg.Ban.DurationMinutes) * time.Minute,
+		window:    time.Duration(cfg.SSH.Ban.WindowMinutes) * time.Minute,
+		threshold: cfg.SSH.Ban.Threshold,
+		duration:  time.Duration(cfg.SSH.Ban.DurationMinutes) * time.Minute,
+		attempts:  make(map[uint32][]time.Time),
+		banned:    make(map[uint32]time.Time),
+	}
+}
+
+// NewBanManagerFromConfig 使用独立的阈值/窗口/时长创建 BanManager（供 Nginx 等非 SSH 模块使用）
+func NewBanManagerFromConfig(threshold, windowMinutes, durationMinutes int) *BanManager {
+	return &BanManager{
+		window:    time.Duration(windowMinutes) * time.Minute,
+		threshold: threshold,
+		duration:  time.Duration(durationMinutes) * time.Minute,
 		attempts:  make(map[uint32][]time.Time),
 		banned:    make(map[uint32]time.Time),
 	}
