@@ -16,9 +16,9 @@ type BanManager struct {
 
 func NewBanManager(cfg Config) *BanManager {
 	return &BanManager{
-		window:    time.Duration(cfg.Ban.WindowMinutes) * time.Minute,
-		threshold: cfg.Ban.Threshold,
-		duration:  time.Duration(cfg.Ban.DurationMinutes) * time.Minute,
+		window:    time.Duration(cfg.SSH.Ban.WindowMinutes) * time.Minute,
+		threshold: cfg.SSH.Ban.Threshold,
+		duration:  time.Duration(cfg.SSH.Ban.DurationMinutes) * time.Minute,
 		attempts:  make(map[uint32][]time.Time),
 		banned:    make(map[uint32]time.Time),
 	}

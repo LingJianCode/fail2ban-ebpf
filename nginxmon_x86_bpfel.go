@@ -41,6 +41,15 @@ func loadNginxmonObjects(obj interface{}, opts *ebpf.CollectionOptions) error {
 	return spec.LoadAndAssign(obj, opts)
 }
 
+// nginxmonSpecs contains maps and programs before they are loaded into the kernel.
+//
+// It can be passed ebpf.CollectionSpec.Assign.
+type nginxmonSpecs struct {
+	nginxmonProgramSpecs
+	nginxmonMapSpecs
+	nginxmonVariableSpecs
+}
+
 // nginxmonProgramSpecs contains programs before they are loaded into the kernel.
 //
 // It can be passed ebpf.CollectionSpec.Assign.
@@ -56,12 +65,19 @@ type nginxmonMapSpecs struct {
 	NginxEvents    *ebpf.MapSpec `ebpf:"nginx_events"`
 }
 
+// nginxmonVariableSpecs contains global variables before they are loaded into the kernel.
+//
+// It can be passed ebpf.CollectionSpec.Assign.
+type nginxmonVariableSpecs struct {
+}
+
 // nginxmonObjects contains all objects after they have been loaded into the kernel.
 //
 // It can be passed to loadNginxmonObjects or ebpf.CollectionSpec.LoadAndAssign.
 type nginxmonObjects struct {
 	nginxmonPrograms
 	nginxmonMaps
+	nginxmonVariables
 }
 
 func (o *nginxmonObjects) Close() error {
@@ -84,6 +100,12 @@ func (m *nginxmonMaps) Close() error {
 		m.NginxConfigMap,
 		m.NginxEvents,
 	)
+}
+
+// nginxmonVariables contains all global variables after they have been loaded into the kernel.
+//
+// It can be passed to loadNginxmonObjects or ebpf.CollectionSpec.LoadAndAssign.
+type nginxmonVariables struct {
 }
 
 // nginxmonPrograms contains all programs after they have been loaded into the kernel.

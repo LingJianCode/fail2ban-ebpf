@@ -6,17 +6,18 @@ import (
 	"os"
 	"strings"
 
+	"syscall"
+
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
-	"syscall"
 )
 
 // NginxModule 管理 Nginx eBPF 监控模块的生命周期
 type NginxModule struct {
-	objects *nginxmonObjects
+	Objects *nginxmonObjects
 	Reader  *ringbuf.Reader
-	uprobe  link.Link
+	Uprobe  link.Link
 }
 
 // NginxEvent 是从 ringbuf 读取的 Nginx HTTP 事件
@@ -41,9 +42,9 @@ func LoadNginxModule(cfg NginxConfig) (*NginxModule, error) {
 
 	// 写入偏移量配置到 config_map
 	configPairs := [][2]uint32{
-		{0, 0},                          // debug = off
-		{1, uint32(cfg.Offset.ReqConn)}, // req_conn offset
-		{2, uint32(cfg.Offset.ConnFd)},  // conn_fd offset
+		{0, 0},                               // debug = off
+		{1, uint32(cfg.Offset.ReqConn)},      // req_conn offset
+		{2, uint32(cfg.Offset.ConnFd)},       // conn_fd offset
 		{3, uint32(cfg.Offset.ConnSockaddr)}, // conn_sockaddr offset
 	}
 	for _, pair := range configPairs {
@@ -81,9 +82,9 @@ func LoadNginxModule(cfg NginxConfig) (*NginxModule, error) {
 	}
 
 	return &NginxModule{
-		objects: &objs,
-		reader:  rd,
-		uprobe:  up,
+		Objects: &objs,
+		Reader:  rd,
+		Uprobe:  up,
 	}, nil
 }
 
@@ -113,11 +114,11 @@ func (m *NginxModule) Close() error {
 	if m.Reader != nil {
 		err = m.Reader.Close()
 	}
-	if m.uprobe != nil {
-		err = joinErrors(err, m.uprobe.Close())
+	if m.Uprobe != nil {
+		err = joinErrors(err, m.Uprobe.Close())
 	}
-	if m.objects != nil {
-		err = joinErrors(err, m.objects.Close())
+	if m.Objects != nil {
+		err = joinErrors(err, m.Objects.Close())
 	}
 	return err
 }

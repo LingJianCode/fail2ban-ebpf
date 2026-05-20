@@ -1,8 +1,12 @@
-#mode: normal # normal | aggressive
-mode: aggressive
-
 ssh:
-  port: 22 # SSH 监听端口
+  mode: aggressive          # normal | aggressive（SSH 检测模式）
+  port: 22                  # SSH 监听端口
+  max_blocked_ips: 262144   # XDP 黑名单 map 最大容量, 会同步修改ebpf程序中的长度, 大约占用20~40 MB内存
+  short_conn_seconds: 2     # aggressive 模式下，生命周期小于该值且未进入 PAM 认证则视为异常短连接
+  ban:
+    threshold: 3            # 在统计窗口内达到该失败次数则封禁
+    window_minutes: 10      # 失败统计窗口，单位分钟
+    duration_minutes: 10    # 封禁时长，单位分钟；0 表示不自动解封
 
 nginx:
   enabled: false # 是否启用 Nginx 防护
@@ -20,14 +24,7 @@ nginx:
     duration_minutes: 30 # 封禁时长
 
 xdp:
-  iface: ens33 
-
-ban:
-  threshold: 3 # 在统计窗口内达到该失败次数则封禁
-  window_minutes: 10 # 失败统计窗口，单位分钟
-  duration_minutes: 10 # 封禁时长，单位分钟；0 表示不自动解封
-  max_blocked_ips: 262144 # XDP 黑名单 map 最大容量, 会同步修改ebpf程序中的长度, 大约占用20~40 MB内存
-  short_conn_seconds: 2 # aggressive 模式下，生命周期小于该值且未进入 PAM 认证则视为异常短连接
+  iface: ens33
 
 log:
   file: ./logs/fail2ban-ebpf.log # 成功/失败/封禁/解封/启动/退出日志文件

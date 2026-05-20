@@ -39,15 +39,16 @@ SEC("uprobe/ngx_http_finalize_request")
 int handle_ngx_finalize(struct pt_regs *ctx) {
     void *r = (void *)PT_REGS_PARM1(ctx);
     long rc = PT_REGS_PARM2(ctx);
+    
+    // 只关注有效 HTTP 状态码
+    if (rc < 100 || rc > 599) {
+        return 0;
+    }
 
     __u32 req_conn_off = get_nginx_config(CONF_REQ_CONN_OFF_INDEX);
     __u32 conn_fd_off = get_nginx_config(CONF_CONN_FD_OFF_INDEX);
     __u32 conn_sockaddr_off = get_nginx_config(CONF_CONN_SOCKADDR_OFF_INDEX);
 
-    // 只关注有效 HTTP 状态码
-    if (rc < 100 || rc > 599) {
-        return 0;
-    }
 
     __u32 pid = bpf_get_current_pid_tgid() >> 32;
 

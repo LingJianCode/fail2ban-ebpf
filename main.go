@@ -75,11 +75,11 @@ func main() {
 		"config":             *configPath,
 		"libpam":             libPath,
 		"log_file":           cfg.Log.File,
-		"mode":               cfg.Mode,
-		"short_conn_seconds": cfg.Ban.ShortConnSeconds,
+		"mode":               cfg.SSH.Mode,
+		"short_conn_seconds": cfg.SSH.ShortConnSeconds,
 		"ssh_port":           cfg.SSH.Port,
-		"threshold":          cfg.Ban.Threshold,
-		"window_minutes":     cfg.Ban.WindowMinutes,
+		"threshold":          cfg.SSH.Ban.Threshold,
+		"window_minutes":     cfg.SSH.Ban.WindowMinutes,
 		"xdp_iface":          cfg.XDP.Iface,
 		"xdp_mode":           xdpBlocker.Mode(),
 		"nginx_enabled":      cfg.Nginx.Enabled,
@@ -419,8 +419,8 @@ func runEventProcessor(
 				if banned, expiresAt := banManager.RegisterFailure(event.RemoteIP, time.Now()); banned {
 					logBanResult(banFilter, blocker, fields["ip"], event.RemoteIP, expiresAt, map[string]interface{}{
 						"reason":         "auth_failed",
-						"threshold":      cfg.Ban.Threshold,
-						"window_minutes": cfg.Ban.WindowMinutes,
+						"threshold":      cfg.SSH.Ban.Threshold,
+						"window_minutes": cfg.SSH.Ban.WindowMinutes,
 					})
 				}
 			case eventPreauthShortConn:
@@ -448,8 +448,8 @@ func runEventProcessor(
 						"reason":         reason,
 						"exit_status":    exitStatus,
 						"exit_signal":    exitSignal,
-						"threshold":      cfg.Ban.Threshold,
-						"window_minutes": cfg.Ban.WindowMinutes,
+						"threshold":      cfg.SSH.Ban.Threshold,
+						"window_minutes": cfg.SSH.Ban.WindowMinutes,
 					})
 					continue
 				}
@@ -457,9 +457,9 @@ func runEventProcessor(
 				if banned, expiresAt := banManager.RegisterFailure(event.RemoteIP, time.Now()); banned {
 					logBanResult(banFilter, blocker, fields["ip"], event.RemoteIP, expiresAt, map[string]interface{}{
 						"reason":             "preauth_short_conn",
-						"short_conn_seconds": cfg.Ban.ShortConnSeconds,
-						"threshold":          cfg.Ban.Threshold,
-						"window_minutes":     cfg.Ban.WindowMinutes,
+						"short_conn_seconds": cfg.SSH.ShortConnSeconds,
+						"threshold":          cfg.SSH.Ban.Threshold,
+						"window_minutes":     cfg.SSH.Ban.WindowMinutes,
 					})
 				}
 			default:
@@ -587,13 +587,13 @@ func loadConfiguredSshmonObjects(objs *sshmonObjects, cfg Config) error {
 	}
 
 	if preauthVar := spec.Variables["preauth_short_conn_ns"]; preauthVar != nil {
-		if err := preauthVar.Set(uint64(cfg.Ban.ShortConnSeconds) * uint64(time.Second)); err != nil {
+		if err := preauthVar.Set(uint64(cfg.SSH.ShortConnSeconds) * uint64(time.Second)); err != nil {
 			return fmt.Errorf("set preauth_short_conn_ns: %w", err)
 		}
 	}
 	if modeVar := spec.Variables["aggressive_mode"]; modeVar != nil {
 		var enabled uint8
-		if cfg.Mode == "aggressive" {
+		if cfg.SSH.Mode == "aggressive" {
 			enabled = 1
 		}
 		if err := modeVar.Set(enabled); err != nil {

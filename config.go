@@ -8,27 +8,33 @@ import (
 )
 
 type Config struct {
-	Mode string `yaml:"mode"`
-	SSH  struct {
-		Port uint16 `yaml:"port"`
-	} `yaml:"ssh"`
-	Nginx NginxConfig `yaml:"nginx"`
-	XDP struct {
+	SSH      SSHConfig `yaml:"ssh"`
+	Nginx    NginxConfig `yaml:"nginx"`
+	XDP      struct {
 		Iface string `yaml:"iface"`
 	} `yaml:"xdp"`
-	Ban struct {
-		Threshold        int    `yaml:"threshold"`
-		WindowMinutes    int    `yaml:"window_minutes"`
-		DurationMinutes  int    `yaml:"duration_minutes"` // 0 表示永久封禁
-		MaxBlockedIPs    uint32 `yaml:"max_blocked_ips"`
-		ShortConnSeconds int    `yaml:"short_conn_seconds"`
-	} `yaml:"ban"`
-	Log struct {
+	Log      struct {
 		File string `yaml:"file"`
 	} `yaml:"log"`
 	Whitelist struct {
 		Entries []string `yaml:"entries"`
 	} `yaml:"whitelist"`
+}
+
+// SSHConfig SSH 防护配置
+type SSHConfig struct {
+	Mode             string       `yaml:"mode"`              // normal | aggressive
+	Port             uint16       `yaml:"port"`
+	MaxBlockedIPs    uint32       `yaml:"max_blocked_ips"`
+	ShortConnSeconds int          `yaml:"short_conn_seconds"`
+	Ban              SSHBanConfig `yaml:"ban"`
+}
+
+// SSHBanConfig SSH 封禁策略配置
+type SSHBanConfig struct {
+	Threshold       int `yaml:"threshold"`
+	WindowMinutes   int `yaml:"window_minutes"`
+	DurationMinutes int `yaml:"duration_minutes"` // 0 表示永久封禁
 }
 
 // NginxConfig Nginx HTTP 状态码监控配置
@@ -55,8 +61,13 @@ type NginxBanConfig struct {
 
 func defaultConfig() Config {
 	cfg := Config{}
-	cfg.Mode = "normal"
+	cfg.SSH.Mode = "normal"
 	cfg.SSH.Port = 22
+	cfg.SSH.MaxBlockedIPs = 262144
+	cfg.SSH.ShortConnSeconds = 2
+	cfg.SSH.Ban.Threshold = 3
+	cfg.SSH.Ban.WindowMinutes = 10
+	cfg.SSH.Ban.DurationMinutes = 1440
 	cfg.Nginx = NginxConfig{
 		Enabled:          false,
 		WatchStatusCodes: []int{401, 403, 404},
@@ -72,11 +83,6 @@ func defaultConfig() Config {
 		},
 	}
 	cfg.XDP.Iface = "eth0"
-	cfg.Ban.Threshold = 3
-	cfg.Ban.WindowMinutes = 10
-	cfg.Ban.DurationMinutes = 1440
-	cfg.Ban.MaxBlockedIPs = 262144
-	cfg.Ban.ShortConnSeconds = 2
 	cfg.Log.File = "./fail2ban-ebpf.log"
 	return cfg
 }
@@ -97,20 +103,20 @@ func loadConfig(path string) (Config, error) {
 
 func (c Config) validate() error {
 	switch {
-	case c.Mode != "normal" && c.Mode != "aggressive":
-		return fmt.Errorf("mode must be one of: normal, aggressive")
+	case c.SSH.Mode != "normal" && c.SSH.Mode != "aggressive":
+		return fmt.Errorf("ssh.mode must be one of: normal, aggressive")
 	case c.SSH.Port == 0:
 		return fmt.Errorf("ssh.port must be greater than 0")
 	case c.XDP.Iface == "":
 		return fmt.Errorf("xdp.iface must not be empty")
-	case c.Ban.Threshold <= 0:
-		return fmt.Errorf("ban.threshold must be greater than 0")
-	case c.Ban.WindowMinutes <= 0:
-		return fmt.Errorf("ban.window_minutes must be greater than 0")
-	case c.Ban.MaxBlockedIPs == 0:
-		return fmt.Errorf("ban.max_blocked_ips must be greater than 0")
-	case c.Ban.ShortConnSeconds <= 0:
-		return fmt.Errorf("ban.short_conn_seconds must be greater than 0")
+	case c.SSH.Ban.Threshold <= 0:
+		return fmt.Errorf("ssh.ban.threshold must be greater than 0")
+	case c.SSH.Ban.WindowMinutes <= 0:
+		return fmt.Errorf("ssh.ban.window_minutes must be greater than 0")
+	case c.SSH.MaxBlockedIPs == 0:
+		return fmt.Errorf("ssh.max_blocked_ips must be greater than 0")
+	case c.SSH.ShortConnSeconds <= 0:
+		return fmt.Errorf("ssh.short_conn_seconds must be greater than 0")
 	case c.Log.File == "":
 		return fmt.Errorf("log.file must not be empty")
 	}
