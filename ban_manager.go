@@ -24,6 +24,17 @@ func NewBanManager(cfg Config) *BanManager {
 	}
 }
 
+// NewBanManagerFromConfig 使用独立的阈值/窗口/时长创建 BanManager（供 Nginx 等非 SSH 模块使用）
+func NewBanManagerFromConfig(threshold, windowMinutes, durationMinutes int) *BanManager {
+	return &BanManager{
+		window:    time.Duration(windowMinutes) * time.Minute,
+		threshold: threshold,
+		duration:  time.Duration(durationMinutes) * time.Minute,
+		attempts:  make(map[uint32][]time.Time),
+		banned:    make(map[uint32]time.Time),
+	}
+}
+
 func (m *BanManager) RegisterFailure(ip uint32, now time.Time) (bool, time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

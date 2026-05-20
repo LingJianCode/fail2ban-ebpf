@@ -16,11 +16,15 @@ type Runtime struct {
 	tpExit     link.Link
 	pamProbe   link.Link
 	xdpBlocker *XDPBlocker
+	nginxMod   *NginxModule
 }
 
 func (r *Runtime) Close() error {
 	var closeErr error
 
+	if r.nginxMod != nil {
+		closeErr = r.nginxMod.Close()
+	}
 	if r.objs != nil {
 		closeErr = errors.Join(closeErr, r.objs.Close())
 	}

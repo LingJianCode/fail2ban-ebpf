@@ -4,6 +4,21 @@ mode: aggressive
 ssh:
   port: 22 # SSH 监听端口
 
+nginx:
+  enabled: false # 是否启用 Nginx 防护
+  watch_status_codes:
+    - 401
+    - 403
+    - 404
+  offset:
+    req_conn: 8        # r->connection 的偏移量
+    conn_fd: 24         # conn->fd 的偏移量
+    conn_sockaddr: 104  # conn->sockaddr 的偏移量
+  ban:
+    threshold: 20        # 窗口内触发封禁的次数
+    window_minutes: 5    # 统计窗口
+    duration_minutes: 30 # 封禁时长
+
 xdp:
   iface: ens33 
 
