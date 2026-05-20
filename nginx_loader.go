@@ -60,7 +60,7 @@ func LoadNginxModule(cfg NginxConfig) (*NginxModule, error) {
 		objs.Close()
 		return nil, err
 	}
-
+	eventLogger.Event("findNginxPath", map[string]interface{}{"path": nginxPath})
 	ex, err := link.OpenExecutable(nginxPath)
 	if err != nil {
 		objs.Close()

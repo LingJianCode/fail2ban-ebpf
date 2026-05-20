@@ -18,5 +18,7 @@ services:
       - /usr/lib64:/usr/lib64
       - /lib:/lib
       - /lib64:/lib64
+      - /proc:/proc                # ← 新增：nginx 模块扫描宿主机进程所必需
+      - /usr/sbin:/usr/sbin:ro     # ⚠️ 建议新增：确保能访问宿主机 nginx 二进制文件
     environment:
       TZ: Asia/Shanghai
