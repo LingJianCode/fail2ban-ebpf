@@ -148,11 +148,28 @@ func initResources(cfg Config, objs *sshmonObjects) (
 		return nil, nil, "", nil, nil, nil, fmt.Errorf("update port map: %w", err)
 	}
 
-	kpAccept, err := attachAcceptProbe(objs)
-	if err != nil {
-		return nil, nil, "", nil, nil, nil, fmt.Errorf("attach accept probe: %w", err)
+	// Try fexit accelerator first (independent BPF object, shares maps via MapReplacements)
+	var kpAccept link.Link
+	var fexitLink link.Link
+	var fexitObjs *fexitacceptObjects
+	fexitLink, fexitObjs, err = tryAttachFexit(objs)
+	if err == nil {
+		eventLogger.Event("probe_attached", map[string]interface{}{
+			"target": "fexit/inet_csk_accept (accelerator)",
+		})
+		closers = append(closers, func() { _ = fexitLink.Close() })
+		closers = append(closers, func() { _ = fexitObjs.Close() })
+	} else {
+		eventLogger.Event("warning", map[string]interface{}{
+			"message": fmt.Sprintf("fexit accelerator not available: %v, using kretprobe", err),
+		})
+
+		kpAccept, err = attachKretprobe(objs)
+		if err != nil {
+			return nil, nil, "", nil, nil, nil, fmt.Errorf("attach kretprobe: %w", err)
+		}
+		closers = append(closers, func() { _ = kpAccept.Close() })
 	}
-	closers = append(closers, func() { _ = kpAccept.Close() })
 
 	tpFork, err := link.Tracepoint("sched", "sched_process_fork", objs.HandleFork, nil)
 	if err != nil {
@@ -194,6 +211,8 @@ func initResources(cfg Config, objs *sshmonObjects) (
 		objs:       objs,
 		reader:     rd,
 		kpAccept:   kpAccept,
+		fexitLink:  fexitLink,
+		fexitObjs:  fexitObjs,
 		tpFork:     tpFork,
 		tpExit:     tpExit,
 		pamProbe:   up,
@@ -407,32 +426,51 @@ func runEventProcessor(
 	}
 }
 
-func attachAcceptProbe(objs *sshmonObjects) (link.Link, error) {
-	// 1. 优先尝试 fexit（性能更优，可同时获取参数和返回值）
+func attachKretprobe(objs *sshmonObjects) (link.Link, error) {
+	l, err := link.Kretprobe("inet_csk_accept", objs.HandleAcceptKretprobe, nil)
+	if err == nil {
+		eventLogger.Event("probe_attached", map[string]interface{}{
+			"target": "kretprobe/inet_csk_accept",
+		})
+		return l, nil
+	}
+
+	return nil, fmt.Errorf("kretprobe attach failed: %w", err)
+}
+
+// tryAttachFexit attempts to load and attach the fexit accelerator BPF object.
+// It shares the same maps (monitored_ports, pid_ctx_map, events) with the main
+// sshmon object via MapReplacements — no duplicate map allocation.
+// Returns (link, objects, nil) on success, or (nil, nil, error) if unavailable
+// (caller falls back to kretprobe).
+func tryAttachFexit(sshmon *sshmonObjects) (link.Link, *fexitacceptObjects, error) {
+	spec, err := loadFexitaccept()
+	if err != nil {
+		return nil, nil, fmt.Errorf("load fexit spec: %w", err)
+	}
+
+	// Share maps with the main sshmon object so fexit writes into the same maps
+	var objs fexitacceptObjects
+	if err := spec.LoadAndAssign(&objs, &ebpf.CollectionOptions{
+		MapReplacements: map[string]*ebpf.Map{
+			"monitored_ports": sshmon.MonitoredPorts,
+			"pid_ctx_map":     sshmon.PidCtxMap,
+			"events":          sshmon.Events,
+		},
+	}); err != nil {
+		return nil, nil, fmt.Errorf("load fexit objects: %w", err)
+	}
+
 	l, err := link.AttachTracing(link.TracingOptions{
 		Program:    objs.HandleAcceptFexit,
 		AttachType: ebpf.AttachTraceFExit,
 	})
-	if err == nil {
-		eventLogger.Event("probe_attached", map[string]interface{}{
-			"target": "fexit/inet_csk_accept",
-		})
-		return l, nil
-	}
-	eventLogger.Event("warning", map[string]interface{}{
-		"message": fmt.Sprintf("fexit/inet_csk_accept failed: %v, falling back to kretprobe", err),
-	})
-
-	// 2. 回退到 kretprobe（兼容不支持 BTF 的老内核）
-	l, err = link.Kretprobe("inet_csk_accept", objs.HandleAcceptKretprobe, nil)
-	if err == nil {
-		eventLogger.Event("probe_attached", map[string]interface{}{
-			"target": "kretprobe/inet_csk_accept (fallback)",
-		})
-		return l, nil
+	if err != nil {
+		objs.Close()
+		return nil, nil, fmt.Errorf("attach fexit: %w", err)
 	}
 
-	return nil, fmt.Errorf("both fexit and kretprobe attach failed: %w", err)
+	return l, &objs, nil
 }
 
 func loadConfiguredSshmonObjects(objs *sshmonObjects, cfg Config) error {

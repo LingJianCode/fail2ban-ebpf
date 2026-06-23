@@ -11,7 +11,9 @@ import (
 type Runtime struct {
 	objs       *sshmonObjects
 	reader     *ringbuf.Reader
-	kpAccept   link.Link
+	kpAccept   link.Link   // kretprobe (fexit fallback)
+	fexitLink  link.Link   // fexit accelerator (nil if unavailable)
+	fexitObjs  *fexitacceptObjects // fexit BPF objects (nil if unavailable)
 	tpFork     link.Link
 	tpExit     link.Link
 	pamProbe   link.Link
@@ -24,11 +26,15 @@ func (r *Runtime) Close() error {
 	if r.objs != nil {
 		closeErr = errors.Join(closeErr, r.objs.Close())
 	}
+	if r.fexitObjs != nil {
+		closeErr = errors.Join(closeErr, r.fexitObjs.Close())
+	}
 	if r.reader != nil {
 		closeErr = errors.Join(closeErr, r.reader.Close())
 	}
 	closeErr = errors.Join(
 		closeErr,
+		closeLink(r.fexitLink),
 		closeLink(r.pamProbe),
 		closeLink(r.tpExit),
 		closeLink(r.tpFork),

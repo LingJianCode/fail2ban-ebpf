@@ -48,6 +48,7 @@
 如果你使用 compose 中指定的镜像，需要提前修改 `config.yaml` 中的网卡名称( `xdp.iface` )，详见注意事项：
 
 ```bash
+./build.sh
 docker compose up -d
 ```
 

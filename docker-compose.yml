@@ -1,6 +1,6 @@
 services:
   fail2ban-ebpf:
-    image: docker.cnb.cool/lingjiancode/fail2ban-ebpf:latest 
+    image: localhost/lingjiancode/fail2ban-ebpf:latest
     container_name: fail2ban-ebpf
     privileged: true
     pid: host

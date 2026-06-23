@@ -1,9 +1,0 @@
-$:
-  vscode:
-    - docker:
-        image: docker.cnb.cool/lingjiancode/docker-builder/codebuddy-dev-env:latest
-      runner:
-        cpus: 16
-      services:
-        - vscode
-        - docker

@@ -5,7 +5,7 @@ ssh:
   port: 22 # SSH 监听端口
 
 xdp:
-  iface: ens33 
+  iface: unibr
 
 ban:
   threshold: 3 # 在统计窗口内达到该失败次数则封禁
@@ -19,5 +19,5 @@ log:
 
 whitelist:
   entries:
-    - "192.168.147.1" # 支持单个 IPv4 地址
-    #- "192.168.1.0/24" # 支持 IPv4 CIDR
+    #- "192.168.147.1" # 支持单个 IPv4 地址
+    - "192.168.66.0/24" # 支持 IPv4 CIDR
