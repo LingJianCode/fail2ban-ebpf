@@ -49,38 +49,21 @@ struct {
 	__uint(max_entries, 1024 * 1024);
 } events SEC(".maps");
 
-// --- A1. 记录新连接 (fexit 版本，优先使用) ---
-// fexit 可同时获取函数参数和返回值，性能优于 kretprobe
-SEC("fexit/inet_csk_accept")
-int BPF_PROG(handle_accept_fexit, struct sock *sk, struct sockaddr *addr,
-             int addr_len, int flags, struct sock *newsk) {
-    if (!newsk) {
-        return 0;
-    }
-
-    // 获取本地端口 (skc_num 是主机字节序)
-    __u16 lport = BPF_CORE_READ(newsk, __sk_common.skc_num);
-
-    // 仅记录监控端口（如 22）
-    if (!bpf_map_lookup_elem(&monitored_ports, &lport)) {
-        return 0;
-    }
-
-    __u32 pid = bpf_get_current_pid_tgid() >> 32;
-    __u32 daddr = BPF_CORE_READ(newsk, __sk_common.skc_daddr);
-    struct pid_ctx conn_ctx = {
-        .remote_ip = daddr,
-        .start_ns = bpf_ktime_get_ns(),
-        .auth_attempted = 0,
-    };
-
-    // 记录映射：当前 sshd 主进程 PID -> 连接上下文
-    bpf_map_update_elem(&pid_ctx_map, &pid, &conn_ctx, BPF_ANY);
-
-    return 0;
-}
-
-// --- A2. 记录新连接 (kretprobe 兼容版本，作为 fentry/fexit 不可用时的回退) ---
+// --- A. 记录新连接 (kretprobe 版本) ---
+//
+// 为什么使用 kretprobe 而非 fexit：
+//
+// inet_csk_accept 的函数签名在内核 6.12 发生了不兼容变更：
+//   - 旧内核 (≤6.11): inet_csk_accept(struct sock *sk, int flags, int *err, bool kern)
+//   - 新内核 (≥6.12): inet_csk_accept(struct sock *sk, struct proto_accept_arg *arg)
+//
+// fexit 的 BPF_PROG 宏在编译时固定参数个数，无法通过 bpf_core_type_exists 做运行时
+// 分支。用旧签名编译的 fexit 程序在新内核上会验证失败（参数个数不匹配），且由于
+// LoadAndAssign 是原子操作，单个程序失败会导致整个 Collection 加载失败。
+//
+// kretprobe 只读取返回值（struct sock *newsk），不依赖任何输入参数签名，因此在所有
+// 内核版本上都能稳定工作。本程序也只需要返回值 newsk 来提取客户端 IP 和端口，无需
+// 任何输入参数，所以 kretprobe 是最简洁、兼容性最好的方案。
 SEC("kretprobe/inet_csk_accept")
 int BPF_KRETPROBE(handle_accept_kretprobe, struct sock *newsk) {
     if (!newsk) {
