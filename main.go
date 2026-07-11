@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
@@ -552,32 +551,24 @@ func (nc NginxConfig) IsWatchedStatus(status int) bool {
 	return false
 }
 
+// attachAcceptProbe 通过 kretprobe 挂载到 inet_csk_accept，追踪新建立的 TCP 连接。
+//
+// 设计说明：
+//   - 仅使用 kretprobe，不再使用 fexit。inet_csk_accept 的函数签名在内核 6.12
+//     发生不兼容变更（参数从 4 个减少到 2 个），fexit 的 BPF_PROG 宏在编译时
+//     固定参数个数，无法跨版本兼容。kretprobe 只读取返回值 struct sock *newsk，
+//     不依赖输入参数签名，在所有内核版本上都能稳定工作。
+//   - 本程序只需要返回值 newsk（用于提取客户端 IP 和本地端口），无需任何输入参数，
+//     因此 kretprobe 完全满足需求，且兼容性远优于 fexit。
 func attachAcceptProbe(objs *sshmonObjects) (link.Link, error) {
-	// 1. 优先尝试 fexit（性能更优，可同时获取参数和返回值）
-	l, err := link.AttachTracing(link.TracingOptions{
-		Program:    objs.HandleAcceptFexit,
-		AttachType: ebpf.AttachTraceFExit,
-	})
-	if err == nil {
-		eventLogger.Event("probe_attached", map[string]interface{}{
-			"target": "fexit/inet_csk_accept",
-		})
-		return l, nil
+	l, err := link.Kretprobe("inet_csk_accept", objs.HandleAcceptKretprobe, nil)
+	if err != nil {
+		return nil, fmt.Errorf("kretprobe/inet_csk_accept: %w", err)
 	}
-	eventLogger.Event("warning", map[string]interface{}{
-		"message": fmt.Sprintf("fexit/inet_csk_accept failed: %v, falling back to kretprobe", err),
+	eventLogger.Event("probe_attached", map[string]interface{}{
+		"target": "kretprobe/inet_csk_accept",
 	})
-
-	// 2. 回退到 kretprobe（兼容不支持 BTF 的老内核）
-	l, err = link.Kretprobe("inet_csk_accept", objs.HandleAcceptKretprobe, nil)
-	if err == nil {
-		eventLogger.Event("probe_attached", map[string]interface{}{
-			"target": "kretprobe/inet_csk_accept (fallback)",
-		})
-		return l, nil
-	}
-
-	return nil, fmt.Errorf("both fexit and kretprobe attach failed: %w", err)
+	return l, nil
 }
 
 func loadConfiguredSshmonObjects(objs *sshmonObjects, cfg Config) error {

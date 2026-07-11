@@ -8,7 +8,7 @@
 
 ### SSH 防护
 
-- 通过 `inet_csk_accept` + `sched_process_fork` 追踪 SSH 连接和子进程继承关系
+- 通过 `inet_csk_accept` kretprobe + `sched_process_fork` 追踪 SSH 连接和子进程继承关系
 - 通过 `pam_authenticate` `uretprobe` 获取认证成功/失败结果
 - 支持按 SSH 端口过滤
 - 支持配置封禁阈值、统计窗口、封禁时长
@@ -128,6 +128,7 @@ time=2026-04-29T12:37:00+08:00 event=ip_unblocked ip=192.168.1.20 source=nginx
 
 - 如果 SSH 监听端口不是 `22`，需要同步修改 `ssh.port`。
 - `mode=normal` 仅统计 PAM 认证失败；`mode=aggressive` 会额外启用 preauth 短连接检测。
+- **内核兼容性**：SSH 连接追踪使用 `inet_csk_accept` 的 kretprobe（仅读取返回值 `struct sock *newsk`），不依赖函数输入参数签名，因此在所有支持的内核版本（包括 6.12+ 签名变更后的内核）上均可正常工作。
 
 ### Nginx
 
@@ -159,6 +160,11 @@ time=2026-04-29T12:37:00+08:00 event=ip_unblocked ip=192.168.1.20 source=nginx
 
 - **`pam_authenticate` 挂载失败**
   检查宿主机 `libpam.so.0` 是否存在，检查容器是否挂载了宿主机库目录。
+
+- **`inet_csk_accept` kretprobe 挂载失败**
+  - 确认以 root 权限运行
+  - 确认内核已启用 BTF（`/sys/kernel/btf/vmlinux` 存在）
+  - 极少数精简内核可能未导出 `inet_csk_accept` 符号，可通过 `cat /proc/kallsyms | grep inet_csk_accept` 确认
 
 ### Nginx 相关
 
